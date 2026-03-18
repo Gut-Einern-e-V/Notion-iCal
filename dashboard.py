@@ -11,6 +11,7 @@ import secrets
 import logging
 import threading
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv, set_key
 from flask import (
@@ -111,6 +112,19 @@ def _get_dashboard_password():
     return os.getenv("DASHBOARD_PASSWORD") or None
 
 
+def _is_safe_redirect(url):
+    """Return True only if *url* is a relative (same-origin) URL.
+
+    Prevents open-redirect attacks where the ``next`` query parameter
+    could point to an external site.
+    """
+    if not url:
+        return False
+    parsed = urlparse(url)
+    # Allow only relative URLs: no scheme and no netloc
+    return not parsed.scheme and not parsed.netloc
+
+
 def login_required(view):
     """Decorator that redirects unauthenticated users to the login page.
 
@@ -134,7 +148,9 @@ def login():
     if request.method == "POST":
         if request.form.get("password") == password:
             session["authenticated"] = True
-            next_url = request.args.get("next") or url_for("index")
+            next_url = request.args.get("next")
+            if not _is_safe_redirect(next_url):
+                next_url = url_for("index")
             return redirect(next_url)
         flash("Incorrect password.", "error")
 
@@ -292,9 +308,14 @@ def feed(token, filename):
         is_read = db.get("read_token") == token
         if (is_admin or is_read) and db.get("output_file") == filename:
             filepath = os.path.join(DATA_DIR, filename)
-            if os.path.isfile(filepath):
+            # Prevent path traversal: ensure the resolved path stays within DATA_DIR
+            real_data_dir = os.path.realpath(DATA_DIR)
+            real_filepath = os.path.realpath(filepath)
+            if os.path.commonpath([real_data_dir, real_filepath]) != real_data_dir:
+                abort(404)
+            if os.path.isfile(real_filepath):
                 return send_file(
-                    filepath,
+                    real_filepath,
                     mimetype="text/calendar",
                     as_attachment=False,
                     download_name=filename,
