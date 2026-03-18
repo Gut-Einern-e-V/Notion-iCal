@@ -107,6 +107,38 @@ docker compose up -d --build
 | `DASHBOARD_PORT` | Port for the web dashboard | `5000` |
 | `FLASK_SECRET_KEY` | Secret key for Flask sessions | `notion-ical-dev-key` |
 | `FLASK_DEBUG` | Set to `1` to enable debug mode | `0` |
+| `DASHBOARD_PASSWORD` | Password to protect the dashboard UI | *(disabled)* |
+
+## Calendar Subscriptions
+
+Each configured database gets a unique, secret subscription URL like:
+
+```
+https://your-host/feed/<token>/calendar.ics
+```
+
+Copy the URL from the dashboard and add it as a **calendar subscription** in
+Google Calendar, Apple Calendar, Outlook, or any app that supports iCal feeds.
+
+- **No password required** for feed URLs — calendar apps don't support
+  authentication, so each feed uses an unguessable token in the URL instead.
+- **Regenerate** a feed URL from the dashboard if you need to revoke access.
+  Existing subscribers will need the new link.
+
+## Dashboard Password Protection
+
+Set `DASHBOARD_PASSWORD` in your `.env` file (or environment) to require a
+password before accessing the dashboard.  When set, users are redirected to a
+login page.  Feed URLs remain publicly accessible (they are secured by their
+secret tokens).
+
+```bash
+# .env
+DASHBOARD_PASSWORD=my-secret-password
+```
+
+If `DASHBOARD_PASSWORD` is not set, the dashboard is open (useful for
+development or when it's only reachable over a private network).
 
 ## Running Tests
 
