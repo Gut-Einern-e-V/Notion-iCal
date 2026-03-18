@@ -81,7 +81,7 @@ def _scheduler_loop():
     logger.info("Auto-sync started: every %d minute(s)", interval)
     # Initial sync on startup
     _run_sync()
-    while not _scheduler_stop.wait(timeout=interval * 60):
+    while not _scheduler_stop.wait(timeout=interval * 60):  # minutes → seconds
         _run_sync()
 
 
