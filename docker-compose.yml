@@ -11,4 +11,5 @@ services:
       - NOTION_TOKEN=${NOTION_TOKEN}
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-change-me-in-production}
       - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-}
+      - SYNC_INTERVAL_MINUTES=${SYNC_INTERVAL_MINUTES:-30}
     restart: unless-stopped

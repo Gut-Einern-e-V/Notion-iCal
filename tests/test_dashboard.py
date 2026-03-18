@@ -3,12 +3,14 @@
 import json
 import os
 import sys
+import threading
+from unittest.mock import patch, MagicMock
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from dashboard import app
+from dashboard import app, _run_sync, _get_sync_interval, start_scheduler, stop_scheduler
 from NotionClient import save_config
 
 
@@ -280,3 +282,193 @@ class TestRegenerateToken:
         config = load_config()
         assert config["databases"][0].get("feed_token")
         assert len(config["databases"][0]["feed_token"]) > 20
+
+
+class TestReadToken:
+    """Test read-only share token functionality."""
+
+    def test_add_database_generates_read_token(self, client, tmp_path, monkeypatch):
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+        save_config({"databases": []})
+
+        client.post("/databases/add", data={
+            "name": "New",
+            "database_id": "db-new",
+            "output_file": "new.ics",
+            "prop_title": "Name",
+            "prop_date": "Date",
+            "prop_category": "",
+            "prop_group": "",
+            "uppercase_categories": "",
+        })
+
+        from NotionClient import load_config
+        config = load_config()
+        db = config["databases"][0]
+        assert db.get("read_token")
+        assert len(db["read_token"]) > 20
+        # read_token and feed_token must differ
+        assert db["read_token"] != db["feed_token"]
+
+    def test_feed_accepts_read_token(self, client, tmp_path, monkeypatch):
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+
+        ics_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "read_test.ics")
+        ics_path = os.path.normpath(ics_path)
+        with open(ics_path, "wb") as f:
+            f.write(b"BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n")
+
+        save_config({
+            "databases": [{
+                "name": "Test",
+                "database_id": "db-1",
+                "output_file": "read_test.ics",
+                "feed_token": "admin-token-123",
+                "read_token": "read-token-456",
+            }]
+        })
+
+        try:
+            # read_token should work
+            resp = client.get("/feed/read-token-456/read_test.ics")
+            assert resp.status_code == 200
+            assert resp.content_type == "text/calendar; charset=utf-8"
+            # admin token should still work
+            resp = client.get("/feed/admin-token-123/read_test.ics")
+            assert resp.status_code == 200
+        finally:
+            os.unlink(ics_path)
+
+    def test_feed_rejects_invalid_read_token(self, client, tmp_path, monkeypatch):
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+        save_config({
+            "databases": [{
+                "name": "Test",
+                "database_id": "db-1",
+                "output_file": "test.ics",
+                "feed_token": "admin-token-123",
+                "read_token": "read-token-456",
+            }]
+        })
+        resp = client.get("/feed/wrong-token/test.ics")
+        assert resp.status_code == 404
+
+    def test_regenerate_read_token(self, client, tmp_path, monkeypatch):
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+        save_config({
+            "databases": [{
+                "name": "Test",
+                "database_id": "db-1",
+                "output_file": "test.ics",
+                "feed_token": "admin-token-123",
+                "read_token": "old-read-token",
+            }]
+        })
+
+        resp = client.post("/databases/regenerate-read-token/0", follow_redirects=True)
+        assert resp.status_code == 200
+
+        from NotionClient import load_config
+        config = load_config()
+        assert config["databases"][0]["read_token"] != "old-read-token"
+        # Admin token should be unchanged
+        assert config["databases"][0]["feed_token"] == "admin-token-123"
+
+    def test_edit_preserves_read_token(self, client, tmp_path, monkeypatch):
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+        save_config({
+            "databases": [{
+                "name": "Old",
+                "database_id": "db-1",
+                "output_file": "old.ics",
+                "property_mappings": {"title": "Name", "date": "Date",
+                                      "category": "Type", "group": "Class"},
+                "uppercase_categories": [],
+                "feed_token": "admin-token",
+                "read_token": "read-token",
+            }]
+        })
+
+        client.post("/databases/edit/0", data={
+            "name": "Updated",
+            "database_id": "db-1",
+            "output_file": "updated.ics",
+            "prop_title": "Name",
+            "prop_date": "Date",
+            "prop_category": "Type",
+            "prop_group": "Class",
+            "uppercase_categories": "",
+        })
+
+        from NotionClient import load_config
+        config = load_config()
+        assert config["databases"][0]["feed_token"] == "admin-token"
+        assert config["databases"][0]["read_token"] == "read-token"
+
+
+class TestAutoSync:
+    """Test background auto-sync functionality."""
+
+    def test_get_sync_interval_default(self, monkeypatch):
+        monkeypatch.delenv("SYNC_INTERVAL_MINUTES", raising=False)
+        assert _get_sync_interval() == 30
+
+    def test_get_sync_interval_custom(self, monkeypatch):
+        monkeypatch.setenv("SYNC_INTERVAL_MINUTES", "15")
+        assert _get_sync_interval() == 15
+
+    def test_get_sync_interval_zero_disables(self, monkeypatch):
+        monkeypatch.setenv("SYNC_INTERVAL_MINUTES", "0")
+        assert _get_sync_interval() == 0
+
+    def test_get_sync_interval_invalid_falls_back(self, monkeypatch):
+        monkeypatch.setenv("SYNC_INTERVAL_MINUTES", "not-a-number")
+        assert _get_sync_interval() == 30
+
+    def test_run_sync_skips_without_token(self, monkeypatch):
+        monkeypatch.delenv("NOTION_TOKEN", raising=False)
+        import dashboard
+        dashboard._last_sync_time = None
+        _run_sync()
+        assert dashboard._last_sync_time is None
+
+    @patch("dashboard.NotionClient")
+    def test_run_sync_updates_state(self, mock_client_cls, monkeypatch):
+        monkeypatch.setenv("NOTION_TOKEN", "fake-token")
+        mock_instance = MagicMock()
+        mock_instance.sync_all.return_value = [
+            {"name": "Test", "output_file": "t.ics", "event_count": 5, "error": None}
+        ]
+        mock_client_cls.return_value = mock_instance
+        import dashboard
+        dashboard._last_sync_time = None
+        dashboard._last_sync_results = None
+
+        _run_sync()
+
+        assert dashboard._last_sync_time is not None
+        assert dashboard._last_sync_results is not None
+        assert dashboard._last_sync_results[0]["event_count"] == 5
+
+    def test_index_shows_auto_sync_status(self, client, monkeypatch):
+        monkeypatch.setenv("SYNC_INTERVAL_MINUTES", "15")
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert b"Auto-Sync" in resp.data
+        assert b"15 minute" in resp.data
+
+    def test_index_shows_disabled_sync(self, client, monkeypatch):
+        monkeypatch.setenv("SYNC_INTERVAL_MINUTES", "0")
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert b"Disabled" in resp.data

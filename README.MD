@@ -108,17 +108,40 @@ docker compose up -d --build
 | `FLASK_SECRET_KEY` | Secret key for Flask sessions | `notion-ical-dev-key` |
 | `FLASK_DEBUG` | Set to `1` to enable debug mode | `0` |
 | `DASHBOARD_PASSWORD` | Password to protect the dashboard UI | *(disabled)* |
+| `SYNC_INTERVAL_MINUTES` | Auto-sync interval in minutes (`0` to disable) | `30` |
+
+## Auto-Sync
+
+The dashboard automatically syncs all configured databases in the background
+on a configurable interval.  This means your iCal subscription URLs always
+serve up-to-date data without any manual action.
+
+- Set `SYNC_INTERVAL_MINUTES` to control how often syncs run (default: every
+  30 minutes).
+- Set `SYNC_INTERVAL_MINUTES=0` to disable auto-sync (manual sync only).
+- The first sync runs immediately when the dashboard starts.
+- You can still trigger a manual sync from the dashboard at any time.
+
+```bash
+# .env
+SYNC_INTERVAL_MINUTES=15   # sync every 15 minutes
+```
 
 ## Calendar Subscriptions
 
-Each configured database gets a unique, secret subscription URL like:
+Each configured database gets two subscription URLs:
 
-```
-https://your-host/feed/<token>/calendar.ics
-```
+- **Share URL (read-only)** – safe to give to external people.  They can
+  subscribe to the calendar but have no management access.
+- **Admin URL (read/write)** – for internal use.  Keep this URL private.
 
-Copy the URL from the dashboard and add it as a **calendar subscription** in
-Google Calendar, Apple Calendar, Outlook, or any app that supports iCal feeds.
+Both URLs serve the same calendar data.  Having two separate tokens means you
+can **revoke external access** (regenerate the share URL) without breaking
+your own subscriptions, and vice-versa.
+
+Copy the appropriate URL from the dashboard and add it as a **calendar
+subscription** in Google Calendar, Apple Calendar, Outlook, or any app that
+supports iCal feeds.
 
 - **No password required** for feed URLs — calendar apps don't support
   authentication, so each feed uses an unguessable token in the URL instead.
