@@ -18,7 +18,7 @@ from flask import (
     session, send_file, abort,
 )
 
-from NotionClient import NotionClient, load_config, save_config, CONFIG_PATH
+from NotionClient import NotionClient, load_config, save_config, CONFIG_PATH, DATA_DIR
 
 load_dotenv()
 
@@ -291,9 +291,7 @@ def feed(token, filename):
         is_admin = db.get("feed_token") == token
         is_read = db.get("read_token") == token
         if (is_admin or is_read) and db.get("output_file") == filename:
-            filepath = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)), filename
-            )
+            filepath = os.path.join(DATA_DIR, filename)
             if os.path.isfile(filepath):
                 return send_file(
                     filepath,

@@ -1,15 +1,17 @@
 services:
   notion-ical:
-    build: .
+    image: ghcr.io/gut-einern-e-v/notion-ical:latest
     ports:
       - "${DASHBOARD_PORT:-5000}:5000"
     volumes:
-      - ./config.json:/app/config.json
-      - ./.env:/app/.env
-      - ./output:/app/output
+      - notion-ical-data:/app/data
     environment:
       - NOTION_TOKEN=${NOTION_TOKEN}
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-change-me-in-production}
       - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-}
       - SYNC_INTERVAL_MINUTES=${SYNC_INTERVAL_MINUTES:-30}
+      - DATA_DIR=/app/data
     restart: unless-stopped
+
+volumes:
+  notion-ical-data:

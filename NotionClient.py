@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 
 NOTION_API_VERSION = "2022-06-28"
 DEFAULT_OUTPUT_FILE = "Notion.ics"
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(os.path.abspath(__file__)))
+CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
 
 
 def load_config():
@@ -22,6 +23,7 @@ def load_config():
 
 def save_config(config):
     """Save database configurations to config.json."""
+    os.makedirs(DATA_DIR, exist_ok=True)
     with open(CONFIG_PATH, "w") as f:
         json.dump(config, f, indent=2)
 
@@ -168,7 +170,8 @@ class NotionClient:
                     uppercase_categories=db.get("uppercase_categories"),
                 )
                 output_file = db.get("output_file", DEFAULT_OUTPUT_FILE)
-                export_ical(events, output_file)
+                output_path = output_file if os.path.isabs(output_file) else os.path.join(DATA_DIR, output_file)
+                export_ical(events, output_path)
                 results.append({
                     "name": db.get("name", "Unknown"),
                     "output_file": output_file,
