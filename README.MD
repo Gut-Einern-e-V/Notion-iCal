@@ -109,6 +109,7 @@ docker compose up -d --build
 | `FLASK_DEBUG` | Set to `1` to enable debug mode | `0` |
 | `DASHBOARD_PASSWORD` | Password to protect the dashboard UI | *(disabled)* |
 | `SYNC_INTERVAL_MINUTES` | Auto-sync interval in minutes (`0` to disable) | `30` |
+| `BASE_URL` | External URL for feed links (for reverse proxies / tunnels) | *(auto-detected)* |
 
 ## Auto-Sync
 
@@ -126,6 +127,25 @@ serve up-to-date data without any manual action.
 # .env
 SYNC_INTERVAL_MINUTES=15   # sync every 15 minutes
 ```
+
+## Reverse Proxy & Tailscale Tunnels
+
+By default, the dashboard generates feed URLs using the address from the
+incoming request (e.g. `http://localhost:5000/`).  When the service is behind
+a reverse proxy or a Tailscale Funnel / tunnel, the auto-detected address will
+be wrong.
+
+Set `BASE_URL` to the externally reachable address so that the generated
+calendar-subscription links work for everyone:
+
+```bash
+# .env
+BASE_URL=https://my-machine.tail12345.ts.net
+```
+
+The value may include a port and/or path prefix — a trailing slash is added
+automatically if missing.  When `BASE_URL` is not set, the service falls back
+to auto-detection.
 
 ## Calendar Subscriptions
 

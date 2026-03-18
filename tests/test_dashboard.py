@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from dashboard import app, _run_sync, _get_sync_interval, start_scheduler, stop_scheduler, _is_safe_redirect
+from dashboard import app, _run_sync, _get_sync_interval, _get_base_url, start_scheduler, stop_scheduler, _is_safe_redirect
 from NotionClient import save_config
 
 
@@ -589,3 +589,76 @@ class TestFeedPathTraversal:
         # cannot match the <token> placeholder (which is a single path segment).
         resp = client.get("/feed/../good-token/test.ics")
         assert resp.status_code == 404
+
+
+class TestBaseUrl:
+    """Test BASE_URL environment variable for feed link generation."""
+
+    def test_get_base_url_default_is_none(self, monkeypatch):
+        monkeypatch.delenv("BASE_URL", raising=False)
+        assert _get_base_url() is None
+
+    def test_get_base_url_empty_is_none(self, monkeypatch):
+        monkeypatch.setenv("BASE_URL", "")
+        assert _get_base_url() is None
+
+    def test_get_base_url_whitespace_is_none(self, monkeypatch):
+        monkeypatch.setenv("BASE_URL", "   ")
+        assert _get_base_url() is None
+
+    def test_get_base_url_adds_trailing_slash(self, monkeypatch):
+        monkeypatch.setenv("BASE_URL", "https://my-machine.tail12345.ts.net")
+        assert _get_base_url() == "https://my-machine.tail12345.ts.net/"
+
+    def test_get_base_url_preserves_trailing_slash(self, monkeypatch):
+        monkeypatch.setenv("BASE_URL", "https://my-machine.tail12345.ts.net/")
+        assert _get_base_url() == "https://my-machine.tail12345.ts.net/"
+
+    def test_get_base_url_with_port(self, monkeypatch):
+        monkeypatch.setenv("BASE_URL", "https://example.com:8443")
+        assert _get_base_url() == "https://example.com:8443/"
+
+    def test_index_uses_base_url_in_feed_links(self, client, tmp_path, monkeypatch):
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+        monkeypatch.setenv("BASE_URL", "https://my-tunnel.ts.net")
+        save_config({
+            "databases": [{
+                "name": "Test",
+                "database_id": "db-1",
+                "output_file": "test.ics",
+                "feed_token": "admin-tok",
+                "read_token": "read-tok",
+                "property_mappings": {"title": "Name", "date": "Date",
+                                      "category": "Type", "group": "Class"},
+                "uppercase_categories": [],
+            }]
+        })
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert b"https://my-tunnel.ts.net/feed/read-tok/test.ics" in resp.data
+        assert b"https://my-tunnel.ts.net/feed/admin-tok/test.ics" in resp.data
+
+    def test_index_falls_back_to_request_url_root(self, client, tmp_path, monkeypatch):
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+        monkeypatch.delenv("BASE_URL", raising=False)
+        save_config({
+            "databases": [{
+                "name": "Test",
+                "database_id": "db-1",
+                "output_file": "test.ics",
+                "feed_token": "admin-tok",
+                "read_token": "read-tok",
+                "property_mappings": {"title": "Name", "date": "Date",
+                                      "category": "Type", "group": "Class"},
+                "uppercase_categories": [],
+            }]
+        })
+        resp = client.get("/")
+        assert resp.status_code == 200
+        # Default Flask test client uses http://localhost/
+        assert b"http://localhost/feed/read-tok/test.ics" in resp.data
+        assert b"http://localhost/feed/admin-tok/test.ics" in resp.data
