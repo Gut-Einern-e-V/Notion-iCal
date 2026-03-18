@@ -81,7 +81,7 @@
         <label style="margin-top:0;"><strong>🔗 Share URL (read-only)</strong></label>
         <div style="display:flex; gap:.5rem; align-items:center;">
           <input type="text" readonly
-                 value="{{ request.url_root }}feed/{{ db.read_token }}/{{ db.output_file }}"
+                 value="{{ base_url or request.url_root }}feed/{{ db.read_token }}/{{ db.output_file }}"
                  style="flex:1; font-size:.8rem; background:#f6f8fa;"
                  onclick="this.select()">
           <button class="btn btn-primary btn-sm" type="button"
@@ -95,7 +95,7 @@
         <label style="margin-top:0;"><strong>🔒 Admin URL (read/write)</strong></label>
         <div style="display:flex; gap:.5rem; align-items:center;">
           <input type="text" readonly
-                 value="{{ request.url_root }}feed/{{ db.feed_token }}/{{ db.output_file }}"
+                 value="{{ base_url or request.url_root }}feed/{{ db.feed_token }}/{{ db.output_file }}"
                  style="flex:1; font-size:.8rem; background:#f6f8fa;"
                  onclick="this.select()">
           <button class="btn btn-primary btn-sm" type="button"

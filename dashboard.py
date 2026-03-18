@@ -164,6 +164,29 @@ def logout():
 
 
 # ---------------------------------------------------------------------------
+# BASE_URL helper
+# ---------------------------------------------------------------------------
+
+def _get_base_url():
+    """Return the configured ``BASE_URL``, or *None* to fall back to ``request.url_root``.
+
+    When the service is behind a reverse proxy or Tailscale tunnel the
+    auto-detected URL will be wrong (e.g. ``http://localhost:5000/``).
+    Setting ``BASE_URL`` lets the admin specify the externally reachable
+    address so that the generated feed links are correct.
+
+    A trailing slash is ensured so the value can be concatenated directly
+    with a relative path.
+    """
+    url = os.getenv("BASE_URL", "").strip()
+    if not url:
+        return None
+    if not url.endswith("/"):
+        url += "/"
+    return url
+
+
+# ---------------------------------------------------------------------------
 # Dashboard routes (protected)
 # ---------------------------------------------------------------------------
 
@@ -174,6 +197,7 @@ def index():
     notion_token = os.getenv("NOTION_TOKEN", "")
     token_display = f"{notion_token[:8]}..." if len(notion_token) > 8 else notion_token
     sync_interval = _get_sync_interval()
+    base_url = _get_base_url()
     return render_template(
         "index.html",
         databases=config.get("databases", []),
@@ -181,6 +205,7 @@ def index():
         token_set=bool(notion_token),
         sync_interval=sync_interval,
         last_sync_time=_last_sync_time,
+        base_url=base_url,
     )
 
 
