@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from dashboard import app, _run_sync, _get_sync_interval, start_scheduler, stop_scheduler
+from dashboard import app, _run_sync, _get_sync_interval, start_scheduler, stop_scheduler, _is_safe_redirect
 from NotionClient import save_config
 
 
@@ -472,3 +472,120 @@ class TestAutoSync:
         resp = client.get("/")
         assert resp.status_code == 200
         assert b"Disabled" in resp.data
+
+
+class TestIsSafeRedirect:
+    """Unit tests for the open-redirect guard helper."""
+
+    def test_relative_path_is_safe(self):
+        assert _is_safe_redirect("/dashboard") is True
+
+    def test_root_is_safe(self):
+        assert _is_safe_redirect("/") is True
+
+    def test_none_is_not_safe(self):
+        assert _is_safe_redirect(None) is False
+
+    def test_empty_string_is_not_safe(self):
+        assert _is_safe_redirect("") is False
+
+    def test_absolute_url_is_not_safe(self):
+        assert _is_safe_redirect("http://evil.com") is False
+
+    def test_https_url_is_not_safe(self):
+        assert _is_safe_redirect("https://evil.com/steal") is False
+
+    def test_protocol_relative_url_is_not_safe(self):
+        # //evil.com has an empty scheme but a netloc
+        assert _is_safe_redirect("//evil.com") is False
+
+
+class TestLoginOpenRedirect:
+    """Verify that the login route rejects open-redirect next= values."""
+
+    def test_safe_next_is_followed(self, client, monkeypatch):
+        monkeypatch.setenv("DASHBOARD_PASSWORD", "secret123")
+        resp = client.post(
+            "/login?next=/settings",
+            data={"password": "secret123"},
+        )
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/settings")
+
+    def test_external_next_is_blocked(self, client, monkeypatch):
+        monkeypatch.setenv("DASHBOARD_PASSWORD", "secret123")
+        resp = client.post(
+            "/login?next=http://evil.com",
+            data={"password": "secret123"},
+        )
+        assert resp.status_code == 302
+        # Must NOT redirect to external site
+        location = resp.headers["Location"]
+        assert "evil.com" not in location
+        # Should redirect to index
+        assert location.endswith("/")
+
+    def test_protocol_relative_next_is_blocked(self, client, monkeypatch):
+        monkeypatch.setenv("DASHBOARD_PASSWORD", "secret123")
+        resp = client.post(
+            "/login?next=//evil.com",
+            data={"password": "secret123"},
+        )
+        assert resp.status_code == 302
+        location = resp.headers["Location"]
+        assert "evil.com" not in location
+
+    def test_missing_next_redirects_to_index(self, client, monkeypatch):
+        monkeypatch.setenv("DASHBOARD_PASSWORD", "secret123")
+        resp = client.post("/login", data={"password": "secret123"})
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/")
+
+
+class TestFeedPathTraversal:
+    """Verify that the feed endpoint blocks path-traversal attempts."""
+
+    def test_feed_path_traversal_blocked(self, client, tmp_path, monkeypatch):
+        """A token matching a DB with a traversal output_file must not leak files."""
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.DATA_DIR", str(tmp_path))
+
+        # Create a sensitive file one level above DATA_DIR
+        parent = tmp_path.parent
+        sensitive = parent / "sensitive.txt"
+        sensitive.write_text("secret")
+
+        save_config({
+            "databases": [{
+                "name": "Evil",
+                "database_id": "db-1",
+                "output_file": "../sensitive.txt",
+                "feed_token": "traversal-token",
+            }]
+        })
+
+        resp = client.get("/feed/traversal-token/../sensitive.txt")
+        assert resp.status_code == 404
+
+    def test_feed_token_with_path_separator_not_routed(self, client, tmp_path, monkeypatch):
+        """The token URL segment cannot contain slashes (Flask routing rejects it)."""
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.DATA_DIR", str(tmp_path))
+
+        save_config({
+            "databases": [{
+                "name": "Test",
+                "database_id": "db-1",
+                "output_file": "test.ics",
+                "feed_token": "good-token",
+            }]
+        })
+
+        # A URL where the token segment contains a path-separator-like sequence
+        # cannot match the <token> placeholder (which is a single path segment).
+        resp = client.get("/feed/../good-token/test.ics")
+        assert resp.status_code == 404
