@@ -1,0 +1,16 @@
+{
+  "databases": [
+    {
+      "name": "My Calendar",
+      "database_id": "",
+      "output_file": "Notion.ics",
+      "property_mappings": {
+        "title": "Name",
+        "date": "Date",
+        "category": "Type",
+        "group": "Class"
+      },
+      "uppercase_categories": ["Assignment", "Exam"]
+    }
+  ]
+}
