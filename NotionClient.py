@@ -8,6 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 NOTION_API_VERSION = "2022-06-28"
+DEFAULT_OUTPUT_FILE = "Notion.ics"
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
 
@@ -150,6 +151,7 @@ class NotionClient:
         config = load_config()
         results = []
         for db in config.get("databases", []):
+            # Fall back to DATABASE_ID env var for legacy single-database setups
             db_id = db.get("database_id") or os.getenv("DATABASE_ID", "")
             if not db_id:
                 results.append({
@@ -165,7 +167,7 @@ class NotionClient:
                     property_mappings=db.get("property_mappings"),
                     uppercase_categories=db.get("uppercase_categories"),
                 )
-                output_file = db.get("output_file", "Notion.ics")
+                output_file = db.get("output_file", DEFAULT_OUTPUT_FILE)
                 export_ical(events, output_file)
                 results.append({
                     "name": db.get("name", "Unknown"),

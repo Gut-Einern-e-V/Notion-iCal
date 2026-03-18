@@ -111,7 +111,7 @@ def _db_entry_from_form(form):
     return {
         "name": form.get("name", "").strip(),
         "database_id": form.get("database_id", "").strip(),
-        "output_file": form.get("output_file", "Notion.ics").strip(),
+        "output_file": form.get("output_file", "calendar.ics").strip(),
         "property_mappings": {
             "title": form.get("prop_title", "Name").strip(),
             "date": form.get("prop_date", "Date").strip(),

@@ -70,7 +70,8 @@ class TestExportIcal:
         ]
         out = str(tmp_path / "test.ics")
         export_ical(events, out)
-        content = open(out, "rb").read()
+        with open(out, "rb") as f:
+            content = f.read()
         assert b"BEGIN:VCALENDAR" in content
         assert b"Meeting" in content
         assert b"Deadline" in content
@@ -79,7 +80,8 @@ class TestExportIcal:
     def test_empty_events_produces_valid_ical(self, tmp_path):
         out = str(tmp_path / "empty.ics")
         export_ical([], out)
-        content = open(out, "rb").read()
+        with open(out, "rb") as f:
+            content = f.read()
         assert b"BEGIN:VCALENDAR" in content
         assert b"END:VCALENDAR" in content
 
