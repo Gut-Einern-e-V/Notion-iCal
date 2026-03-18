@@ -1,51 +1,130 @@
-# Notion Client
-The inspiration for this project came from my own experience using Notion. Though Notion's calendar view is very helpful, it would be even better if it was able to integrate with existing calendar solutions so that my Outlook or Google Calendar contained all the information I need for my day. As a student, my Notion calendar is full of class deadlines months and months in advance and incorpating all those events into my calendar without having to spend the afternoon manually inputting them.
+# Notion-iCal
 
-> **Note**: Some of the setup of this project is specific to how my Notion database is setup. This project can be cloned and changed accordingly to account for differences in how notion users have their setups.
+Sync Notion databases to iCalendar (`.ics`) files that you can import into
+Google Calendar, Outlook, Apple Calendar, or any other calendar app.
 
-## Notion API
-Notion's new API is very powerful and has allowed this project to happen. With their excellent development tools, I was able to quickly get this project working and collect the data I needed from my existing Notion databases.
+## Features
 
-## Workflow
-1. Connect to Notion with API Key
-2. Get all events from board
-3. Organize into dictionary
-4. Organize into iCal format
-5. Export iCal file
+- **Multiple databases** – sync a team calendar, vacation calendar, class
+  deadlines, or any other Notion database in one go.
+- **Web dashboard** – a simple browser UI so that non-technical users can
+  configure databases, update the Notion token, and trigger syncs.
+- **Configurable property mappings** – map any Notion property names (Title,
+  Date, Category, Group) to match your database setup.
+- **Docker support** – one-command deployment with `docker compose up`.
+- **Pagination** – handles large databases (>100 items) automatically.
+- **Date & datetime** – supports both all-day and timed events, including
+  start/end ranges.
 
-## Setup
-### API Token
-Go to (Notion API Website)[https://www.notion.so/my-integrations] and register a new integration and receive your integration's API key.
+## Quick Start
 
-### Attach Database to Integration
-1. Go to your board in (Notion)[Notion.so]
-2. Click on "Share" in the top right corner
-3. Invite your integration to the board
+### 1. Get a Notion API Token
 
-### Git Clone
-To clone this repo, please run ...
-`git clone https://github.com/radroof22/Notion-iCal`
+Go to <https://www.notion.so/my-integrations>, create a new integration, and
+copy the token.
 
-### Virtual Environment
-In order to run the virtual environment, run ...
+### 2. Share Your Database
+
+Open your Notion database → **Share** → invite the integration.
+
+### 3. Clone & Install
+
 ```bash
-source env/bin/activate
+git clone https://github.com/Gut-Einern-e-V/Notion-iCal.git
+cd Notion-iCal
+python -m venv env && source env/bin/activate
+pip install -r requirements.txt
 ```
 
-### Environment Variables
-This project makes use of environment variables. In order to edit the configuration for your setup, please add a `.env` file in the root directory. You must set the following environment variables...
-`
-NOTION_TOKEN=############
-DATABASE_ID=##########
-`
+### 4. Configure
 
-### Run It!
-Just run ...
-`python3 main.py`
-and see Notion.ics be generated
+Copy the example config and set your token:
 
-### Add it!
-Import the `Notion.ics` into your favorite calendar app and enjoy!
+```bash
+cp .env.example .env        # then edit .env with your NOTION_TOKEN
+```
 
-## To-DO
-* [ ] Make Quiz and Exams All Caps
+Edit `config.json` to add your databases (or use the web dashboard):
+
+```json
+{
+  "databases": [
+    {
+      "name": "Team Calendar",
+      "database_id": "your-database-id",
+      "output_file": "team.ics",
+      "property_mappings": {
+        "title": "Name",
+        "date": "Date",
+        "category": "Type",
+        "group": "Team"
+      },
+      "uppercase_categories": ["Exam"]
+    }
+  ]
+}
+```
+
+### 5a. Command-Line Sync
+
+```bash
+python main.py
+```
+
+### 5b. Web Dashboard
+
+```bash
+python dashboard.py
+# Open http://localhost:5000
+```
+
+### 6. Import the `.ics` File
+
+Import the generated `.ics` file into your favourite calendar application.
+
+## Docker Deployment
+
+```bash
+docker compose up -d
+```
+
+The dashboard will be available at `http://localhost:5000`.
+Configuration is persisted via the mounted `config.json` and `.env` files.
+
+To update to a newer version:
+
+```bash
+git pull
+docker compose up -d --build
+```
+
+## Configuration Reference
+
+| Environment Variable | Description | Default |
+|---|---|---|
+| `NOTION_TOKEN` | Notion integration API token | *(required)* |
+| `DATABASE_ID` | Fallback database ID (legacy) | – |
+| `DASHBOARD_PORT` | Port for the web dashboard | `5000` |
+| `FLASK_SECRET_KEY` | Secret key for Flask sessions | `notion-ical-dev-key` |
+| `FLASK_DEBUG` | Set to `1` to enable debug mode | `0` |
+
+## Running Tests
+
+```bash
+pip install pytest
+python -m pytest tests/ -v
+```
+
+## Project Structure
+
+```
+├── NotionClient.py        # Core: Notion API client & iCal export
+├── main.py                # CLI entry point
+├── dashboard.py           # Flask web dashboard
+├── config.json            # Database configurations
+├── requirements.txt       # Python dependencies
+├── templates/             # Dashboard HTML templates
+├── tests/                 # Test suite
+├── Dockerfile
+└── docker-compose.yml
+```

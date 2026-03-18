@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings – Notion-iCal</title>
+  <style>
+    :root { --bg: #f5f5f5; --card: #fff; --primary: #2f81f7; --text: #24292f; --muted: #656d76; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+    .container { max-width: 820px; margin: 0 auto; padding: 2rem 1rem; }
+    h1 { margin-bottom: 1.5rem; }
+    nav { display: flex; gap: 1rem; margin-bottom: 2rem; }
+    nav a { text-decoration: none; color: var(--primary); font-weight: 500; }
+    .flash { padding: .75rem 1rem; border-radius: 6px; margin-bottom: 1rem; }
+    .flash.success { background: #dafbe1; color: #116329; }
+    .flash.error { background: #ffebe9; color: #82071e; }
+    .card { background: var(--card); border: 1px solid #d0d7de; border-radius: 8px; padding: 1.25rem; margin-bottom: 1rem; }
+    label { display: block; font-weight: 500; margin-bottom: .25rem; margin-top: .75rem; }
+    input[type="text"], input[type="password"] { width: 100%; padding: .5rem; border: 1px solid #d0d7de; border-radius: 6px; font-size: .875rem; }
+    .btn { display: inline-block; padding: .5rem 1rem; border-radius: 6px; border: 1px solid transparent; font-size: .875rem; cursor: pointer; text-decoration: none; font-weight: 500; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .hint { color: var(--muted); font-size: .8rem; margin-top: .25rem; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>⚙️ Settings</h1>
+  <nav>
+    <a href="{{ url_for('index') }}">← Back to Dashboard</a>
+  </nav>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}
+  <div class="flash {{ cat }}">{{ msg }}</div>
+  {% endfor %}
+  {% endwith %}
+
+  <div class="card">
+    <h2>Notion API Token</h2>
+    <p class="hint">Current: {% if token_set %}{{ token_display }}{% else %}Not set{% endif %}</p>
+    <form method="post">
+      <label for="notion_token">New Token</label>
+      <input type="password" id="notion_token" name="notion_token" placeholder="secret_…" required>
+      <p class="hint">Get your token at <a href="https://www.notion.so/my-integrations" target="_blank">notion.so/my-integrations</a></p>
+      <br>
+      <button class="btn btn-primary" type="submit">Save Token</button>
+    </form>
+  </div>
+</div>
+</body>
+</html>
