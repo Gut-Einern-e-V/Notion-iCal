@@ -9,6 +9,8 @@ import json
 import os
 import secrets
 import logging
+import threading
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv, set_key
 from flask import (
@@ -26,6 +28,78 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "notion-ical-dev-key")
 ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Background auto-sync scheduler
+# ---------------------------------------------------------------------------
+
+_sync_lock = threading.Lock()
+_last_sync_time = None
+_last_sync_results = None
+_scheduler_thread = None
+_scheduler_stop = threading.Event()
+
+
+def _get_sync_interval():
+    """Return the configured sync interval in minutes, or 0 to disable."""
+    try:
+        return int(os.getenv("SYNC_INTERVAL_MINUTES", "30"))
+    except (ValueError, TypeError):
+        return 30
+
+
+def _run_sync():
+    """Execute a sync and store the results (thread-safe)."""
+    global _last_sync_time, _last_sync_results
+    token = os.getenv("NOTION_TOKEN", "")
+    if not token:
+        logger.warning("Auto-sync skipped: NOTION_TOKEN not set")
+        return
+    with _sync_lock:
+        try:
+            client = NotionClient(token)
+            results = client.sync_all()
+            _last_sync_time = datetime.now(timezone.utc)
+            _last_sync_results = results
+            for r in results:
+                if r["error"]:
+                    logger.error("Auto-sync error for %s: %s", r["name"], r["error"])
+                else:
+                    logger.info("Auto-synced %s: %d events", r["name"], r["event_count"])
+        except Exception:
+            logger.exception("Auto-sync failed")
+
+
+def _scheduler_loop():
+    """Background loop that runs sync on a fixed interval."""
+    interval = _get_sync_interval()
+    if interval <= 0:
+        logger.info("Auto-sync disabled (SYNC_INTERVAL_MINUTES=0)")
+        return
+    logger.info("Auto-sync started: every %d minute(s)", interval)
+    # Initial sync on startup
+    _run_sync()
+    while not _scheduler_stop.wait(timeout=interval * 60):
+        _run_sync()
+
+
+def start_scheduler():
+    """Start the background sync scheduler (called once at startup)."""
+    global _scheduler_thread
+    if _scheduler_thread is not None and _scheduler_thread.is_alive():
+        return
+    _scheduler_stop.clear()
+    _scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True)
+    _scheduler_thread.start()
+
+
+def stop_scheduler():
+    """Stop the background sync scheduler."""
+    _scheduler_stop.set()
+    if _scheduler_thread is not None:
+        _scheduler_thread.join(timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -83,11 +157,14 @@ def index():
     config = load_config()
     notion_token = os.getenv("NOTION_TOKEN", "")
     token_display = f"{notion_token[:8]}..." if len(notion_token) > 8 else notion_token
+    sync_interval = _get_sync_interval()
     return render_template(
         "index.html",
         databases=config.get("databases", []),
         token_display=token_display,
         token_set=bool(notion_token),
+        sync_interval=sync_interval,
+        last_sync_time=_last_sync_time,
     )
 
 
@@ -131,8 +208,9 @@ def edit_database(idx):
         return redirect(url_for("index"))
     if request.method == "POST":
         edited = _db_entry_from_form(request.form)
-        # Preserve existing feed token
+        # Preserve existing feed token and read token
         edited["feed_token"] = dbs[idx].get("feed_token", _generate_feed_token())
+        edited["read_token"] = dbs[idx].get("read_token", _generate_feed_token())
         dbs[idx] = edited
         save_config(config)
         flash(f"Database '{dbs[idx]['name']}' updated.", "success")
@@ -160,8 +238,21 @@ def regenerate_token(idx):
     if 0 <= idx < len(dbs):
         dbs[idx]["feed_token"] = _generate_feed_token()
         save_config(config)
-        flash(f"Subscription URL for '{dbs[idx]['name']}' regenerated. "
+        flash(f"Admin URL for '{dbs[idx]['name']}' regenerated. "
               "Update any existing calendar subscriptions.", "success")
+    return redirect(url_for("index"))
+
+
+@app.route("/databases/regenerate-read-token/<int:idx>", methods=["POST"])
+@login_required
+def regenerate_read_token(idx):
+    config = load_config()
+    dbs = config.get("databases", [])
+    if 0 <= idx < len(dbs):
+        dbs[idx]["read_token"] = _generate_feed_token()
+        save_config(config)
+        flash(f"Read-only share URL for '{dbs[idx]['name']}' regenerated. "
+              "Update any existing shared subscriptions.", "success")
     return redirect(url_for("index"))
 
 
@@ -189,10 +280,17 @@ def sync():
 
 @app.route("/feed/<token>/<path:filename>")
 def feed(token, filename):
-    """Serve an .ics file if the token matches a configured database."""
+    """Serve an .ics file if the token matches a configured database.
+
+    Both ``feed_token`` (read-write / admin) and ``read_token`` (read-only /
+    share) are accepted.  The served content is identical — the two tokens
+    exist so they can be revoked independently.
+    """
     config = load_config()
     for db in config.get("databases", []):
-        if db.get("feed_token") == token and db.get("output_file") == filename:
+        is_admin = db.get("feed_token") == token
+        is_read = db.get("read_token") == token
+        if (is_admin or is_read) and db.get("output_file") == filename:
             filepath = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)), filename
             )
@@ -233,9 +331,11 @@ def _db_entry_from_form(form):
             if c.strip()
         ],
         "feed_token": _generate_feed_token(),
+        "read_token": _generate_feed_token(),
     }
 
 
 if __name__ == "__main__":
     port = int(os.getenv("DASHBOARD_PORT", "5000"))
+    start_scheduler()
     app.run(host="0.0.0.0", port=port, debug=os.getenv("FLASK_DEBUG", "0") == "1")

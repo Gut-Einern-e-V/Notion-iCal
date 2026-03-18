@@ -54,6 +54,14 @@
   <div class="status card">
     <strong>Notion Token:</strong>
     {% if token_set %}✅ Configured ({{ token_display }}){% else %}❌ Not set — <a href="{{ url_for('settings') }}">configure now</a>{% endif %}
+    <br>
+    <strong>Auto-Sync:</strong>
+    {% if sync_interval > 0 %}
+      ✅ Every {{ sync_interval }} minute{{ 's' if sync_interval != 1 else '' }}
+      {% if last_sync_time %} — last sync {{ last_sync_time.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
+    {% else %}
+      ❌ Disabled (set <code>SYNC_INTERVAL_MINUTES</code>)
+    {% endif %}
   </div>
 
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
@@ -68,9 +76,23 @@
     <div class="card">
       <h3>{{ db.name or "Unnamed" }}</h3>
       <p class="meta">ID: {{ db.database_id[:12] }}… &nbsp; → &nbsp; {{ db.output_file }}</p>
+      {% if db.read_token %}
+      <div style="margin-top:.75rem;">
+        <label style="margin-top:0;"><strong>🔗 Share URL (read-only)</strong></label>
+        <div style="display:flex; gap:.5rem; align-items:center;">
+          <input type="text" readonly
+                 value="{{ request.url_root }}feed/{{ db.read_token }}/{{ db.output_file }}"
+                 style="flex:1; font-size:.8rem; background:#f6f8fa;"
+                 onclick="this.select()">
+          <button class="btn btn-primary btn-sm" type="button"
+                  onclick="navigator.clipboard.writeText(this.previousElementSibling.value); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1500);">Copy</button>
+        </div>
+        <p class="meta" style="margin-top:.25rem;">Share this URL with external people. They can subscribe but cannot modify the calendar.</p>
+      </div>
+      {% endif %}
       {% if db.feed_token %}
       <div style="margin-top:.75rem;">
-        <label style="margin-top:0;"><strong>📋 Subscription URL</strong></label>
+        <label style="margin-top:0;"><strong>🔒 Admin URL (read/write)</strong></label>
         <div style="display:flex; gap:.5rem; align-items:center;">
           <input type="text" readonly
                  value="{{ request.url_root }}feed/{{ db.feed_token }}/{{ db.output_file }}"
@@ -79,7 +101,7 @@
           <button class="btn btn-primary btn-sm" type="button"
                   onclick="navigator.clipboard.writeText(this.previousElementSibling.value); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1500);">Copy</button>
         </div>
-        <p class="meta" style="margin-top:.25rem;">Add this URL as a calendar subscription in your calendar app. Anyone with this link can see this calendar.</p>
+        <p class="meta" style="margin-top:.25rem;">Keep this URL private. For internal use with full management access.</p>
       </div>
       {% endif %}
       <div class="actions">
@@ -88,10 +110,16 @@
               onsubmit="return confirm('Delete this database?')">
           <button class="btn btn-danger btn-sm" type="submit">Delete</button>
         </form>
+        {% if db.read_token %}
+        <form method="post" action="{{ url_for('regenerate_read_token', idx=loop.index0) }}" style="display:inline"
+              onsubmit="return confirm('Regenerate the read-only share URL? External subscribers will need the new link.')">
+          <button class="btn btn-sm" style="background:#6e7781; color:#fff;" type="submit">🔄 New Share URL</button>
+        </form>
+        {% endif %}
         {% if db.feed_token %}
         <form method="post" action="{{ url_for('regenerate_token', idx=loop.index0) }}" style="display:inline"
-              onsubmit="return confirm('Regenerate the subscription URL? Existing subscribers will need the new link.')">
-          <button class="btn btn-sm" style="background:#6e7781; color:#fff;" type="submit">🔄 New URL</button>
+              onsubmit="return confirm('Regenerate the admin URL? Internal subscribers will need the new link.')">
+          <button class="btn btn-sm" style="background:#6e7781; color:#fff;" type="submit">🔄 New Admin URL</button>
         </form>
         {% endif %}
       </div>
