@@ -4,12 +4,17 @@ Run with: python dashboard.py
 Then open http://localhost:5000 in your browser.
 """
 
+import functools
 import json
 import os
+import secrets
 import logging
 
 from dotenv import load_dotenv, set_key
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import (
+    Flask, render_template, request, redirect, url_for, flash,
+    session, send_file, abort,
+)
 
 from NotionClient import NotionClient, load_config, save_config, CONFIG_PATH
 
@@ -23,7 +28,57 @@ ENV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 logging.basicConfig(level=logging.INFO)
 
 
+# ---------------------------------------------------------------------------
+# Authentication helpers
+# ---------------------------------------------------------------------------
+
+def _get_dashboard_password():
+    """Return the configured dashboard password, or *None* if auth is disabled."""
+    return os.getenv("DASHBOARD_PASSWORD") or None
+
+
+def login_required(view):
+    """Decorator that redirects unauthenticated users to the login page.
+
+    If ``DASHBOARD_PASSWORD`` is not set, all requests are allowed through
+    (backwards-compatible with the previous behaviour).
+    """
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        if _get_dashboard_password() and not session.get("authenticated"):
+            return redirect(url_for("login", next=request.path))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    password = _get_dashboard_password()
+    if not password:
+        return redirect(url_for("index"))
+
+    if request.method == "POST":
+        if request.form.get("password") == password:
+            session["authenticated"] = True
+            next_url = request.args.get("next") or url_for("index")
+            return redirect(next_url)
+        flash("Incorrect password.", "error")
+
+    return render_template("login.html")
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.pop("authenticated", None)
+    return redirect(url_for("login"))
+
+
+# ---------------------------------------------------------------------------
+# Dashboard routes (protected)
+# ---------------------------------------------------------------------------
+
 @app.route("/")
+@login_required
 def index():
     config = load_config()
     notion_token = os.getenv("NOTION_TOKEN", "")
@@ -37,6 +92,7 @@ def index():
 
 
 @app.route("/settings", methods=["GET", "POST"])
+@login_required
 def settings():
     if request.method == "POST":
         token = request.form.get("notion_token", "").strip()
@@ -53,6 +109,7 @@ def settings():
 
 
 @app.route("/databases/add", methods=["GET", "POST"])
+@login_required
 def add_database():
     if request.method == "POST":
         config = load_config()
@@ -65,6 +122,7 @@ def add_database():
 
 
 @app.route("/databases/edit/<int:idx>", methods=["GET", "POST"])
+@login_required
 def edit_database(idx):
     config = load_config()
     dbs = config.get("databases", [])
@@ -72,7 +130,10 @@ def edit_database(idx):
         flash("Database not found.", "error")
         return redirect(url_for("index"))
     if request.method == "POST":
-        dbs[idx] = _db_entry_from_form(request.form)
+        edited = _db_entry_from_form(request.form)
+        # Preserve existing feed token
+        edited["feed_token"] = dbs[idx].get("feed_token", _generate_feed_token())
+        dbs[idx] = edited
         save_config(config)
         flash(f"Database '{dbs[idx]['name']}' updated.", "success")
         return redirect(url_for("index"))
@@ -80,6 +141,7 @@ def edit_database(idx):
 
 
 @app.route("/databases/delete/<int:idx>", methods=["POST"])
+@login_required
 def delete_database(idx):
     config = load_config()
     dbs = config.get("databases", [])
@@ -90,7 +152,21 @@ def delete_database(idx):
     return redirect(url_for("index"))
 
 
+@app.route("/databases/regenerate-token/<int:idx>", methods=["POST"])
+@login_required
+def regenerate_token(idx):
+    config = load_config()
+    dbs = config.get("databases", [])
+    if 0 <= idx < len(dbs):
+        dbs[idx]["feed_token"] = _generate_feed_token()
+        save_config(config)
+        flash(f"Subscription URL for '{dbs[idx]['name']}' regenerated. "
+              "Update any existing calendar subscriptions.", "success")
+    return redirect(url_for("index"))
+
+
 @app.route("/sync", methods=["POST"])
+@login_required
 def sync():
     token = os.getenv("NOTION_TOKEN", "")
     if not token:
@@ -105,6 +181,39 @@ def sync():
             flash(f"Synced {r['name']}: {r['event_count']} events → {r['output_file']}",
                   "success")
     return redirect(url_for("index"))
+
+
+# ---------------------------------------------------------------------------
+# Public iCal feed (token-authenticated)
+# ---------------------------------------------------------------------------
+
+@app.route("/feed/<token>/<path:filename>")
+def feed(token, filename):
+    """Serve an .ics file if the token matches a configured database."""
+    config = load_config()
+    for db in config.get("databases", []):
+        if db.get("feed_token") == token and db.get("output_file") == filename:
+            filepath = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), filename
+            )
+            if os.path.isfile(filepath):
+                return send_file(
+                    filepath,
+                    mimetype="text/calendar",
+                    as_attachment=False,
+                    download_name=filename,
+                )
+            abort(404)
+    abort(404)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _generate_feed_token():
+    """Generate a cryptographically secure feed token."""
+    return secrets.token_urlsafe(32)
 
 
 def _db_entry_from_form(form):
@@ -123,6 +232,7 @@ def _db_entry_from_form(form):
             for c in form.get("uppercase_categories", "").split(",")
             if c.strip()
         ],
+        "feed_token": _generate_feed_token(),
     }
 
 

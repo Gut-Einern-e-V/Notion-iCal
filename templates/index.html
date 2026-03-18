@@ -38,6 +38,11 @@
     <a href="{{ url_for('index') }}">Home</a>
     <a href="{{ url_for('settings') }}">Settings</a>
     <a href="{{ url_for('add_database') }}">+ Add Database</a>
+    {% if session.get('authenticated') %}
+    <form method="post" action="{{ url_for('logout') }}" style="display:inline; margin-left:auto;">
+      <button style="background:none; border:none; color:var(--primary); cursor:pointer; font-weight:500; font-size:1rem; font-family:inherit;">Logout</button>
+    </form>
+    {% endif %}
   </nav>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -63,12 +68,32 @@
     <div class="card">
       <h3>{{ db.name or "Unnamed" }}</h3>
       <p class="meta">ID: {{ db.database_id[:12] }}… &nbsp; → &nbsp; {{ db.output_file }}</p>
+      {% if db.feed_token %}
+      <div style="margin-top:.75rem;">
+        <label style="margin-top:0;"><strong>📋 Subscription URL</strong></label>
+        <div style="display:flex; gap:.5rem; align-items:center;">
+          <input type="text" readonly
+                 value="{{ request.url_root }}feed/{{ db.feed_token }}/{{ db.output_file }}"
+                 style="flex:1; font-size:.8rem; background:#f6f8fa;"
+                 onclick="this.select()">
+          <button class="btn btn-primary btn-sm" type="button"
+                  onclick="navigator.clipboard.writeText(this.previousElementSibling.value); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy',1500);">Copy</button>
+        </div>
+        <p class="meta" style="margin-top:.25rem;">Add this URL as a calendar subscription in your calendar app. Anyone with this link can see this calendar.</p>
+      </div>
+      {% endif %}
       <div class="actions">
         <a class="btn btn-primary btn-sm" href="{{ url_for('edit_database', idx=loop.index0) }}">Edit</a>
         <form method="post" action="{{ url_for('delete_database', idx=loop.index0) }}" style="display:inline"
               onsubmit="return confirm('Delete this database?')">
           <button class="btn btn-danger btn-sm" type="submit">Delete</button>
         </form>
+        {% if db.feed_token %}
+        <form method="post" action="{{ url_for('regenerate_token', idx=loop.index0) }}" style="display:inline"
+              onsubmit="return confirm('Regenerate the subscription URL? Existing subscribers will need the new link.')">
+          <button class="btn btn-sm" style="background:#6e7781; color:#fff;" type="submit">🔄 New URL</button>
+        </form>
+        {% endif %}
       </div>
     </div>
     {% endfor %}

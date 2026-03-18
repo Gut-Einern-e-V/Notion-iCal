@@ -10,4 +10,5 @@ services:
     environment:
       - NOTION_TOKEN=${NOTION_TOKEN}
       - FLASK_SECRET_KEY=${FLASK_SECRET_KEY:-change-me-in-production}
+      - DASHBOARD_PASSWORD=${DASHBOARD_PASSWORD:-}
     restart: unless-stopped
