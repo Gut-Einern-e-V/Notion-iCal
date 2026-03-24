@@ -91,6 +91,12 @@ docker compose up -d
 The dashboard will be available at `http://localhost:5000`.
 Configuration is persisted via the mounted `config.json` and `.env` files.
 
+To build the image locally instead of pulling from the registry:
+
+```bash
+docker compose up -d --build
+```
+
 To update to a newer version:
 
 ```bash
@@ -182,6 +188,48 @@ DASHBOARD_PASSWORD=my-secret-password
 
 If `DASHBOARD_PASSWORD` is not set, the dashboard is open (useful for
 development or when it's only reachable over a private network).
+
+## Troubleshooting
+
+### `unauthorized` Error When Pulling the Docker Image
+
+If you see an error like:
+
+```
+error from registry: unauthorized unauthorized
+```
+
+when deploying with Portainer or `docker compose pull`, the GitHub Container
+Registry (GHCR) package is most likely still set to **private**.  GHCR packages
+for organization repositories default to private.
+
+**Option A – Make the package public (recommended):**
+
+1. Go to the organization's **Packages** page:
+   `https://github.com/orgs/Gut-Einern-e-V/packages`
+2. Click on the `notion-ical` package.
+3. Go to **Package settings** → **Danger Zone** → **Change package visibility**
+   → set to **Public**.
+
+**Option B – Build locally instead of pulling:**
+
+Clone the repository and build the image on the machine:
+
+```bash
+git clone https://github.com/Gut-Einern-e-V/Notion-iCal.git
+cd Notion-iCal
+docker compose up -d --build
+```
+
+**Option C – Authenticate with GHCR:**
+
+If you prefer to keep the package private, log in to GHCR on the Docker host:
+
+```bash
+echo "YOUR_GITHUB_PAT" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
+```
+
+The personal access token (PAT) needs the `read:packages` scope.
 
 ## Running Tests
 
