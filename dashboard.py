@@ -18,6 +18,7 @@ from flask import (
     Flask, render_template, request, redirect, url_for, flash,
     session, send_file, abort,
 )
+from waitress import serve as waitress_serve
 
 from NotionClient import NotionClient, load_config, save_config, CONFIG_PATH, DATA_DIR
 
@@ -391,4 +392,9 @@ def _db_entry_from_form(form):
 if __name__ == "__main__":
     port = int(os.getenv("DASHBOARD_PORT", "5000"))
     start_scheduler()
-    app.run(host="0.0.0.0", port=port, debug=os.getenv("FLASK_DEBUG", "0") == "1")
+    if os.getenv("FLASK_DEBUG", "0") == "1":
+        app.debug = True
+        app.run(host="0.0.0.0", port=port)
+    else:
+        logger.info("Starting production server on 0.0.0.0:%d", port)
+        waitress_serve(app, host="0.0.0.0", port=port)
