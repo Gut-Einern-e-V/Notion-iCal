@@ -98,6 +98,63 @@ class TestDashboardRoutes:
         assert resp.status_code == 200
         assert b"New" in resp.data
 
+    def test_add_database_rejects_empty_database_id(self, client, tmp_path, monkeypatch):
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+        save_config({"databases": []})
+
+        resp = client.post("/databases/add", data={
+            "name": "NoDB",
+            "database_id": "",
+            "output_file": "nodb.ics",
+            "prop_title": "Name",
+            "prop_date": "Date",
+            "prop_category": "",
+            "prop_group": "",
+            "uppercase_categories": "",
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        assert b"Notion Database ID is required" in resp.data
+        # Verify the database was NOT saved
+        from NotionClient import load_config
+        config = load_config()
+        assert len(config["databases"]) == 0
+
+    def test_edit_database_rejects_empty_database_id(self, client, tmp_path, monkeypatch):
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+        save_config({
+            "databases": [{
+                "name": "Existing",
+                "database_id": "db-1",
+                "output_file": "existing.ics",
+                "property_mappings": {"title": "Name", "date": "Date",
+                                      "category": "Type", "group": "Class"},
+                "uppercase_categories": [],
+                "feed_token": "tok-1",
+                "read_token": "read-1",
+            }]
+        })
+
+        resp = client.post("/databases/edit/0", data={
+            "name": "Existing",
+            "database_id": "",
+            "output_file": "existing.ics",
+            "prop_title": "Name",
+            "prop_date": "Date",
+            "prop_category": "Type",
+            "prop_group": "Class",
+            "uppercase_categories": "",
+        }, follow_redirects=True)
+        assert resp.status_code == 200
+        assert b"Notion Database ID is required" in resp.data
+        # Verify the original database_id was NOT cleared
+        from NotionClient import load_config
+        config = load_config()
+        assert config["databases"][0]["database_id"] == "db-1"
+
 
 class TestAuth:
     """Test dashboard password protection."""
@@ -472,6 +529,31 @@ class TestAutoSync:
         resp = client.get("/")
         assert resp.status_code == 200
         assert b"Disabled" in resp.data
+
+    @patch("dashboard.NotionClient")
+    def test_run_sync_logs_missing_db_id_as_warning(self, mock_client_cls, monkeypatch, caplog):
+        """Missing database_id should log at WARNING, not ERROR."""
+        monkeypatch.setenv("NOTION_TOKEN", "fake-token")
+        mock_instance = MagicMock()
+        mock_instance.sync_all.return_value = [
+            {"name": "My Cal", "output_file": "c.ics", "event_count": 0,
+             "error": "No database_id configured"}
+        ]
+        mock_client_cls.return_value = mock_instance
+        import dashboard
+        dashboard._last_sync_time = None
+        dashboard._last_sync_results = None
+
+        import logging
+        with caplog.at_level(logging.DEBUG):
+            _run_sync()
+
+        warning_msgs = [r for r in caplog.records
+                        if r.levelno == logging.WARNING and "No database_id" in r.message]
+        error_msgs = [r for r in caplog.records
+                      if r.levelno == logging.ERROR and "No database_id" in r.message]
+        assert len(warning_msgs) == 1
+        assert len(error_msgs) == 0
 
 
 class TestIsSafeRedirect:

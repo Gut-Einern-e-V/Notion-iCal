@@ -66,7 +66,10 @@ def _run_sync():
             _last_sync_results = results
             for r in results:
                 if r["error"]:
-                    logger.error("Auto-sync error for %s: %s", r["name"], r["error"])
+                    if r["error"] == "No database_id configured":
+                        logger.warning("Auto-sync skipped for %s: %s", r["name"], r["error"])
+                    else:
+                        logger.error("Auto-sync error for %s: %s", r["name"], r["error"])
                 else:
                     logger.info("Auto-synced %s: %d events", r["name"], r["event_count"])
         except Exception:
@@ -230,8 +233,11 @@ def settings():
 @login_required
 def add_database():
     if request.method == "POST":
-        config = load_config()
         db_entry = _db_entry_from_form(request.form)
+        if not db_entry["database_id"]:
+            flash("Notion Database ID is required.", "error")
+            return render_template("database_form.html", db=db_entry, action="Add")
+        config = load_config()
         config.setdefault("databases", []).append(db_entry)
         save_config(config)
         flash(f"Database '{db_entry['name']}' added.", "success")
@@ -249,6 +255,9 @@ def edit_database(idx):
         return redirect(url_for("index"))
     if request.method == "POST":
         edited = _db_entry_from_form(request.form)
+        if not edited["database_id"]:
+            flash("Notion Database ID is required.", "error")
+            return render_template("database_form.html", db=edited, action="Edit")
         # Preserve existing feed token and read token
         edited["feed_token"] = dbs[idx].get("feed_token", _generate_feed_token())
         edited["read_token"] = dbs[idx].get("read_token", _generate_feed_token())
