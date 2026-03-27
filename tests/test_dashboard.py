@@ -115,7 +115,7 @@ class TestDashboardRoutes:
             "uppercase_categories": "",
         }, follow_redirects=True)
         assert resp.status_code == 200
-        assert b"Database ID is required" in resp.data
+        assert b"Notion Database ID is required" in resp.data
         # Verify the database was NOT saved
         from NotionClient import load_config
         config = load_config()
@@ -149,7 +149,7 @@ class TestDashboardRoutes:
             "uppercase_categories": "",
         }, follow_redirects=True)
         assert resp.status_code == 200
-        assert b"Database ID is required" in resp.data
+        assert b"Notion Database ID is required" in resp.data
         # Verify the original database_id was NOT cleared
         from NotionClient import load_config
         config = load_config()
