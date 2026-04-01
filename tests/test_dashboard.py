@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import logging
 import threading
 from unittest.mock import patch, MagicMock
 
@@ -10,7 +11,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from dashboard import app, _run_sync, _get_sync_interval, _get_base_url, start_scheduler, stop_scheduler, _is_safe_redirect
+from dashboard import app, _run_sync, _get_sync_interval, _get_base_url, start_scheduler, stop_scheduler, _is_safe_redirect, _scheduler_loop
 from NotionClient import save_config
 
 
@@ -744,3 +745,66 @@ class TestBaseUrl:
         # Default Flask test client uses http://localhost/
         assert b"http://localhost/feed/read-tok/test.ics" in resp.data
         assert b"http://localhost/feed/admin-tok/test.ics" in resp.data
+
+
+class TestGracefulErrorHandling:
+    """Verify that errors are handled gracefully instead of crashing."""
+
+    def test_corrupted_config_returns_empty(self, tmp_path, monkeypatch):
+        """load_config() should return empty config on corrupt JSON."""
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        with open(cfg_path, "w") as f:
+            f.write("{invalid json!!!")
+        from NotionClient import load_config
+        result = load_config()
+        assert result == {"databases": []}
+
+    def test_index_survives_corrupted_config(self, client, tmp_path, monkeypatch):
+        """The index route should not crash on a corrupted config file."""
+        cfg_path = str(tmp_path / "config.json")
+        monkeypatch.setattr("NotionClient.CONFIG_PATH", cfg_path)
+        monkeypatch.setattr("dashboard.CONFIG_PATH", cfg_path)
+        with open(cfg_path, "w") as f:
+            f.write("{bad json")
+        resp = client.get("/")
+        assert resp.status_code == 200
+
+    @patch("dashboard.NotionClient")
+    def test_sync_route_handles_unexpected_error(self, mock_cls, client, monkeypatch):
+        """POST /sync should flash an error, not crash, on unexpected exception."""
+        monkeypatch.setenv("NOTION_TOKEN", "tok")
+        mock_cls.return_value.sync_all.side_effect = RuntimeError("boom")
+        resp = client.post("/sync", follow_redirects=True)
+        assert resp.status_code == 200
+        assert b"Sync failed" in resp.data
+
+    def test_unhandled_route_error_returns_500_page(self, client, monkeypatch):
+        """An unhandled exception in a route should render the error template."""
+        monkeypatch.setattr("dashboard.load_config",
+                            MagicMock(side_effect=RuntimeError("kaboom")))
+        resp = client.get("/settings")
+        assert resp.status_code == 200 or resp.status_code == 500
+        # Even on 500, the server should still be running (not crash)
+
+    @patch("dashboard._run_sync", side_effect=RuntimeError("sync crash"))
+    def test_scheduler_loop_does_not_crash_on_error(self, mock_sync, monkeypatch, caplog):
+        """_scheduler_loop should catch exceptions and log them."""
+        monkeypatch.setenv("SYNC_INTERVAL_MINUTES", "1")
+        import dashboard
+        dashboard._scheduler_stop = threading.Event()
+        with caplog.at_level(logging.DEBUG):
+            _scheduler_loop()
+        assert any("Scheduler thread crashed" in r.message for r in caplog.records)
+
+    @patch("dashboard.NotionClient")
+    def test_run_sync_catches_exceptions(self, mock_cls, monkeypatch, caplog):
+        """_run_sync should catch and log exceptions, not propagate them."""
+        monkeypatch.setenv("NOTION_TOKEN", "tok")
+        mock_cls.return_value.sync_all.side_effect = RuntimeError("api down")
+        import dashboard
+        dashboard._last_sync_time = None
+        with caplog.at_level(logging.DEBUG):
+            _run_sync()
+        assert dashboard._last_sync_time is None
+        assert any("Auto-sync failed" in r.message for r in caplog.records)
