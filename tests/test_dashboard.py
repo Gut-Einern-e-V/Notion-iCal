@@ -783,9 +783,9 @@ class TestGracefulErrorHandling:
         """An unhandled exception in a route should render the error template."""
         monkeypatch.setattr("dashboard.load_config",
                             MagicMock(side_effect=RuntimeError("kaboom")))
-        resp = client.get("/settings")
-        assert resp.status_code == 200 or resp.status_code == 500
-        # Even on 500, the server should still be running (not crash)
+        resp = client.get("/")
+        assert resp.status_code == 500
+        assert b"Something went wrong" in resp.data
 
     @patch("dashboard._run_sync", side_effect=RuntimeError("sync crash"))
     def test_scheduler_loop_does_not_crash_on_error(self, mock_sync, monkeypatch, caplog):
