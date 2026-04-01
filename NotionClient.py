@@ -17,8 +17,12 @@ def load_config():
     """Load database configurations from config.json."""
     if not os.path.exists(CONFIG_PATH):
         return {"databases": []}
-    with open(CONFIG_PATH, "r") as f:
-        return json.load(f)
+    try:
+        with open(CONFIG_PATH, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.error("Failed to load config from %s: %s", CONFIG_PATH, exc)
+        return {"databases": []}
 
 
 def save_config(config):

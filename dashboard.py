@@ -20,6 +20,8 @@ from flask import (
 )
 from waitress import serve as waitress_serve
 
+from werkzeug.exceptions import HTTPException
+
 from NotionClient import NotionClient, load_config, save_config, CONFIG_PATH, DATA_DIR
 
 load_dotenv()
@@ -79,15 +81,18 @@ def _run_sync():
 
 def _scheduler_loop():
     """Background loop that runs sync on a fixed interval."""
-    interval = _get_sync_interval()
-    if interval <= 0:
-        logger.info("Auto-sync disabled (SYNC_INTERVAL_MINUTES=0)")
-        return
-    logger.info("Auto-sync started: every %d minute(s)", interval)
-    # Initial sync on startup
-    _run_sync()
-    while not _scheduler_stop.wait(timeout=interval * 60):  # minutes → seconds
+    try:
+        interval = _get_sync_interval()
+        if interval <= 0:
+            logger.info("Auto-sync disabled (SYNC_INTERVAL_MINUTES=0)")
+            return
+        logger.info("Auto-sync started: every %d minute(s)", interval)
+        # Initial sync on startup
         _run_sync()
+        while not _scheduler_stop.wait(timeout=interval * 60):  # minutes → seconds
+            _run_sync()
+    except Exception:
+        logger.exception("Scheduler thread crashed")
 
 
 def start_scheduler():
@@ -188,6 +193,19 @@ def _get_base_url():
     if not url.endswith("/"):
         url += "/"
     return url
+
+
+# ---------------------------------------------------------------------------
+# Error handlers
+# ---------------------------------------------------------------------------
+
+@app.errorhandler(Exception)
+def handle_exception(exc):
+    """Return a user-friendly error page for unhandled exceptions."""
+    if isinstance(exc, HTTPException):
+        return exc
+    logger.exception("Unhandled exception on %s %s", request.method, request.path)
+    return render_template("error.html", error=str(exc)), 500
 
 
 # ---------------------------------------------------------------------------
@@ -314,8 +332,13 @@ def sync():
     if not token:
         flash("Notion token not configured. Go to Settings first.", "error")
         return redirect(url_for("index"))
-    client = NotionClient(token)
-    results = client.sync_all()
+    try:
+        client = NotionClient(token)
+        results = client.sync_all()
+    except Exception as exc:
+        logger.exception("Manual sync failed")
+        flash(f"Sync failed: {exc}", "error")
+        return redirect(url_for("index"))
     for r in results:
         if r["error"]:
             flash(f"Error syncing {r['name']}: {r['error']}", "error")
@@ -392,9 +415,13 @@ def _db_entry_from_form(form):
 if __name__ == "__main__":
     port = int(os.getenv("DASHBOARD_PORT", "5000"))
     start_scheduler()
-    if os.getenv("FLASK_DEBUG", "0") == "1":
-        app.debug = True
-        app.run(host="0.0.0.0", port=port)
-    else:
-        logger.info("Starting production server on 0.0.0.0:%d", port)
-        waitress_serve(app, host="0.0.0.0", port=port)
+    try:
+        if os.getenv("FLASK_DEBUG", "0") == "1":
+            app.debug = True
+            app.run(host="0.0.0.0", port=port)
+        else:
+            logger.info("Starting production server on 0.0.0.0:%d", port)
+            waitress_serve(app, host="0.0.0.0", port=port)
+    except Exception:
+        logger.exception("Server failed to start")
+        stop_scheduler()
